@@ -1,0 +1,12 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+patches/
+dataset/
+outputs/
+splits/
+
+.ipynb_checkpoints/
+.streamlit/secrets.toml
