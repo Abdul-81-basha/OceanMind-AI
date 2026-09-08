@@ -3,3 +3,5 @@ torch==2.8.0
 rasterio==1.4.3
 numpy
 Pillow
+pandas
+reportlab
