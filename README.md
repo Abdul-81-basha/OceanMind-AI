@@ -1,4 +1,6 @@
 # 🌊 OceanMind AI
+**Live Demo:**  
+https://oceanmind-ai-eoupyhve7q2ildamdroszq.streamlit.app/
 
 ## AI-Based Marine Pollution Detection & Monitoring
 
