@@ -28,12 +28,15 @@ st.set_page_config(
 
 
 # ============================================================
-# SETTINGS
+# PROJECT SETTINGS
 # ============================================================
 
 MODEL_PATH = "marine_debris_segmentation.pth"
+
 EXPECTED_BANDS = 11
+
 INPUT_SIZE = 128
+
 THRESHOLD = 0.50
 
 
@@ -55,13 +58,6 @@ st.markdown(
         font-size: 20px;
         opacity: 0.75;
         margin-bottom: 25px;
-    }
-
-    .metric-card {
-        padding: 18px;
-        border-radius: 12px;
-        border: 1px solid rgba(128,128,128,0.25);
-        text-align: center;
     }
 
     .severity-low {
@@ -111,7 +107,7 @@ st.markdown(
 
 
 # ============================================================
-# U-NET
+# U-NET MODEL
 # ============================================================
 
 class DoubleConv(nn.Module):
@@ -125,7 +121,7 @@ class DoubleConv(nn.Module):
             nn.Conv2d(
                 in_channels,
                 out_channels,
-                3,
+                kernel_size=3,
                 padding=1
             ),
 
@@ -136,7 +132,7 @@ class DoubleConv(nn.Module):
             nn.Conv2d(
                 out_channels,
                 out_channels,
-                3,
+                kernel_size=3,
                 padding=1
             ),
 
@@ -146,6 +142,7 @@ class DoubleConv(nn.Module):
         )
 
     def forward(self, x):
+
         return self.block(x)
 
 
@@ -154,6 +151,8 @@ class UNet(nn.Module):
     def __init__(self, input_channels=11):
 
         super().__init__()
+
+        # Encoder
 
         self.enc1 = DoubleConv(
             input_channels,
@@ -172,15 +171,19 @@ class UNet(nn.Module):
 
         self.pool = nn.MaxPool2d(2)
 
+        # Bottleneck
+
         self.bottleneck = DoubleConv(
             128,
             256
         )
 
+        # Decoder
+
         self.up3 = nn.ConvTranspose2d(
             256,
             128,
-            2,
+            kernel_size=2,
             stride=2
         )
 
@@ -192,7 +195,7 @@ class UNet(nn.Module):
         self.up2 = nn.ConvTranspose2d(
             128,
             64,
-            2,
+            kernel_size=2,
             stride=2
         )
 
@@ -204,7 +207,7 @@ class UNet(nn.Module):
         self.up1 = nn.ConvTranspose2d(
             64,
             32,
-            2,
+            kernel_size=2,
             stride=2
         )
 
@@ -213,13 +216,17 @@ class UNet(nn.Module):
             32
         )
 
+        # Output
+
         self.final = nn.Conv2d(
             32,
             1,
-            1
+            kernel_size=1
         )
 
     def forward(self, x):
+
+        # Encoder
 
         e1 = self.enc1(x)
 
@@ -231,13 +238,18 @@ class UNet(nn.Module):
             self.pool(e2)
         )
 
+        # Bottleneck
+
         b = self.bottleneck(
             self.pool(e3)
         )
 
+        # Decoder 3
+
         d3 = self.up3(b)
 
         if d3.shape[-2:] != e3.shape[-2:]:
+
             d3 = F.interpolate(
                 d3,
                 size=e3.shape[-2:],
@@ -252,9 +264,12 @@ class UNet(nn.Module):
 
         d3 = self.dec3(d3)
 
+        # Decoder 2
+
         d2 = self.up2(d3)
 
         if d2.shape[-2:] != e2.shape[-2:]:
+
             d2 = F.interpolate(
                 d2,
                 size=e2.shape[-2:],
@@ -269,9 +284,12 @@ class UNet(nn.Module):
 
         d2 = self.dec2(d2)
 
+        # Decoder 1
+
         d1 = self.up1(d2)
 
         if d1.shape[-2:] != e1.shape[-2:]:
+
             d1 = F.interpolate(
                 d1,
                 size=e1.shape[-2:],
@@ -354,7 +372,7 @@ def load_model():
 
 
 # ============================================================
-# NORMALIZATION
+# NORMALIZE IMAGE
 # ============================================================
 
 def normalize_image(image):
@@ -427,7 +445,11 @@ def create_true_color(image):
     )
 
     rgb = np.stack(
-        [red, green, blue],
+        [
+            red,
+            green,
+            blue
+        ],
         axis=-1
     )
 
@@ -473,49 +495,58 @@ def create_true_color(image):
 # SEVERITY
 # ============================================================
 
-def get_severity(area):
+def get_severity(area_percentage):
 
-    if area == 0:
+    if area_percentage == 0:
 
         return "No Detection"
 
-    if area < 0.10:
+    elif area_percentage < 0.10:
 
         return "Low"
 
-    if area < 1.0:
+    elif area_percentage < 1.0:
 
         return "Moderate"
 
-    return "High"
+    else:
+
+        return "High"
 
 
-def severity_class(severity):
+def get_severity_class(severity):
 
     if severity == "Low":
+
         return "severity-low"
 
-    if severity == "Moderate":
+    elif severity == "Moderate":
+
         return "severity-moderate"
 
-    if severity == "High":
+    elif severity == "High":
+
         return "severity-high"
 
-    return "severity-none"
+    else:
+
+        return "severity-none"
 
 
 # ============================================================
-# MASK
+# MASK IMAGE
 # ============================================================
 
 def create_mask_image(mask):
 
+    mask_uint8 = (
+        mask.astype(
+            np.uint8
+        ) * 255
+    )
+
     return Image.fromarray(
-        (
-            mask.astype(
-                np.uint8
-            ) * 255
-        ),
+        mask_uint8,
         mode="L"
     )
 
@@ -579,6 +610,8 @@ def create_pdf_report(
     bands,
     crs,
     bounds,
+    latitude,
+    longitude,
     debris_pixels,
     total_pixels,
     area_percentage,
@@ -597,9 +630,7 @@ def create_pdf_report(
         ParagraphStyle
     )
 
-    from reportlab.lib.enums import (
-        TA_CENTER
-    )
+    from reportlab.lib.enums import TA_CENTER
 
     from reportlab.platypus import (
         SimpleDocTemplate,
@@ -623,7 +654,7 @@ def create_pdf_report(
     styles = getSampleStyleSheet()
 
     title_style = ParagraphStyle(
-        "Title",
+        "OceanMindTitle",
         parent=styles["Title"],
         alignment=TA_CENTER,
         fontSize=24,
@@ -631,7 +662,7 @@ def create_pdf_report(
     )
 
     subtitle_style = ParagraphStyle(
-        "Subtitle",
+        "OceanMindSubtitle",
         parent=styles["Normal"],
         alignment=TA_CENTER,
         fontSize=12,
@@ -639,6 +670,8 @@ def create_pdf_report(
     )
 
     story = []
+
+    # Title
 
     story.append(
         Paragraph(
@@ -654,162 +687,314 @@ def create_pdf_report(
         )
     )
 
+    # Satellite information
+
     story.append(
         Paragraph(
-            "<b>1. Satellite Image Information</b>",
+            "1. Satellite Image Information",
             styles["Heading2"]
         )
     )
 
     image_data = [
-        ["Parameter", "Value"],
-        ["Filename", filename],
-        ["Spectral Bands", str(bands)],
-        ["Image Width", str(width)],
-        ["Image Height", str(height)],
-        ["CRS", str(crs)],
-        ["Bounds", str(bounds)]
+
+        [
+            "Parameter",
+            "Value"
+        ],
+
+        [
+            "Filename",
+            str(filename)
+        ],
+
+        [
+            "Spectral Bands",
+            str(bands)
+        ],
+
+        [
+            "Image Width",
+            str(width)
+        ],
+
+        [
+            "Image Height",
+            str(height)
+        ],
+
+        [
+            "CRS",
+            str(crs)
+        ],
+
+        [
+            "Bounds",
+            str(bounds)
+        ]
+
     ]
 
     table = Table(
         image_data,
-        colWidths=[150, 330]
+        colWidths=[
+            150,
+            330
+        ]
     )
 
     table.setStyle(
-        TableStyle([
-            (
-                "BACKGROUND",
-                (0, 0),
-                (-1, 0),
-                colors.lightgrey
-            ),
-            (
-                "GRID",
-                (0, 0),
-                (-1, -1),
-                0.5,
-                colors.grey
-            ),
-            (
-                "VALIGN",
-                (0, 0),
-                (-1, -1),
-                "TOP"
-            ),
-            (
-                "PADDING",
-                (0, 0),
-                (-1, -1),
-                6
-            )
-        ])
+        TableStyle(
+            [
+
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (-1, 0),
+                    colors.lightgrey
+                ),
+
+                (
+                    "GRID",
+                    (0, 0),
+                    (-1, -1),
+                    0.5,
+                    colors.grey
+                ),
+
+                (
+                    "VALIGN",
+                    (0, 0),
+                    (-1, -1),
+                    "TOP"
+                ),
+
+                (
+                    "PADDING",
+                    (0, 0),
+                    (-1, -1),
+                    6
+                )
+
+            ]
+        )
     )
 
     story.append(table)
 
     story.append(
-        Spacer(1, 20)
+        Spacer(
+            1,
+            20
+        )
     )
+
+    # Detection results
 
     story.append(
         Paragraph(
-            "<b>2. AI Detection Results</b>",
+            "2. AI Detection Results",
             styles["Heading2"]
         )
     )
 
     detection_data = [
-        ["Metric", "Result"],
+
+        [
+            "Metric",
+            "Result"
+        ],
+
         [
             "Debris Pixels",
             f"{debris_pixels:,}"
         ],
+
         [
             "Total Pixels",
             f"{total_pixels:,}"
         ],
+
         [
             "Detected Area",
             f"{area_percentage:.2f}%"
         ],
+
         [
             "AI Confidence Estimate",
             f"{confidence:.1f}%"
         ],
+
         [
             "Maximum Probability",
             f"{max_probability * 100:.1f}%"
         ],
+
         [
             "Detection Threshold",
             str(threshold)
         ],
+
         [
             "Severity",
             severity
         ]
+
     ]
 
     table2 = Table(
         detection_data,
-        colWidths=[250, 230]
+        colWidths=[
+            250,
+            230
+        ]
     )
 
     table2.setStyle(
-        TableStyle([
-            (
-                "BACKGROUND",
-                (0, 0),
-                (-1, 0),
-                colors.lightgrey
-            ),
-            (
-                "GRID",
-                (0, 0),
-                (-1, -1),
-                0.5,
-                colors.grey
-            ),
-            (
-                "PADDING",
-                (0, 0),
-                (-1, -1),
-                6
-            )
-        ])
+        TableStyle(
+            [
+
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (-1, 0),
+                    colors.lightgrey
+                ),
+
+                (
+                    "GRID",
+                    (0, 0),
+                    (-1, -1),
+                    0.5,
+                    colors.grey
+                ),
+
+                (
+                    "PADDING",
+                    (0, 0),
+                    (-1, -1),
+                    6
+                )
+
+            ]
+        )
     )
 
     story.append(table2)
 
     story.append(
-        Spacer(1, 20)
+        Spacer(
+            1,
+            20
+        )
     )
+
+    # Geographic information
 
     story.append(
         Paragraph(
-            "<b>3. AI Model</b>",
+            "3. Geographic Information",
+            styles["Heading2"]
+        )
+    )
+
+    geographic_data = [
+
+        [
+            "Parameter",
+            "Value"
+        ],
+
+        [
+            "Latitude",
+            f"{latitude:.6f}"
+        ],
+
+        [
+            "Longitude",
+            f"{longitude:.6f}"
+        ]
+
+    ]
+
+    table3 = Table(
+        geographic_data,
+        colWidths=[
+            150,
+            330
+        ]
+    )
+
+    table3.setStyle(
+        TableStyle(
+            [
+
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (-1, 0),
+                    colors.lightgrey
+                ),
+
+                (
+                    "GRID",
+                    (0, 0),
+                    (-1, -1),
+                    0.5,
+                    colors.grey
+                ),
+
+                (
+                    "PADDING",
+                    (0, 0),
+                    (-1, -1),
+                    6
+                )
+
+            ]
+        )
+    )
+
+    story.append(table3)
+
+    story.append(
+        Spacer(
+            1,
+            20
+        )
+    )
+
+    # AI model
+
+    story.append(
+        Paragraph(
+            "4. AI Model",
             styles["Heading2"]
         )
     )
 
     story.append(
         Paragraph(
-            "Model: U-Net Convolutional Neural Network<br/>"
+            "Architecture: U-Net Convolutional Neural Network<br/>"
             "Input: 11-band Sentinel-2 satellite imagery<br/>"
-            "AI input size: 128 × 128 pixels<br/>"
+            "AI Input Size: 128 × 128 pixels<br/>"
             "Output: Pixel-wise marine debris segmentation mask",
             styles["Normal"]
         )
     )
 
     story.append(
-        Spacer(1, 20)
+        Spacer(
+            1,
+            20
+        )
     )
+
+    # Interpretation
 
     story.append(
         Paragraph(
-            "<b>4. Interpretation</b>",
+            "5. Interpretation",
             styles["Heading2"]
         )
     )
@@ -818,27 +1003,32 @@ def create_pdf_report(
         Paragraph(
             "The detected area represents pixels classified "
             "by the model as potential marine debris. "
-            "AI confidence is a model probability estimate "
-            "and should not be interpreted as validated "
-            "real-world accuracy.",
+            "The AI confidence value is a model probability "
+            "estimate and should not be interpreted as "
+            "validated real-world accuracy.",
             styles["Normal"]
         )
     )
 
     story.append(
-        Spacer(1, 20)
+        Spacer(
+            1,
+            20
+        )
     )
 
     story.append(
         Paragraph(
-            "<b>OceanMind AI Research Prototype</b><br/>"
-            "Results should be validated before "
-            "real-world environmental decisions.",
+            "OceanMind AI Research Prototype<br/>"
+            "Results should be validated before real-world "
+            "environmental decisions.",
             styles["Normal"]
         )
     )
 
-    document.build(story)
+    document.build(
+        story
+    )
 
     buffer.seek(0)
 
@@ -885,7 +1075,9 @@ st.divider()
 
 with st.sidebar:
 
-    st.header("🌊 OceanMind AI")
+    st.header(
+        "🌊 OceanMind AI"
+    )
 
     st.write(
         "AI-powered satellite analysis "
@@ -894,29 +1086,73 @@ with st.sidebar:
 
     st.divider()
 
-    st.subheader("🤖 AI Model")
+    st.subheader(
+        "🤖 AI Model"
+    )
 
-    st.write("**Architecture:** U-Net CNN")
-    st.write("**Input Bands:** 11")
-    st.write("**Input Size:** 128 × 128")
-    st.write("**Output:** Segmentation Mask")
-    st.write("**Threshold:** 0.50")
-    st.write("**Device:** CPU")
+    st.write(
+        "**Architecture:** U-Net CNN"
+    )
+
+    st.write(
+        "**Input Bands:** 11"
+    )
+
+    st.write(
+        "**Input Size:** 128 × 128"
+    )
+
+    st.write(
+        "**Output:** Segmentation Mask"
+    )
+
+    st.write(
+        "**Threshold:** 0.50"
+    )
+
+    st.write(
+        "**Device:** CPU"
+    )
 
     st.divider()
 
-    st.subheader("📊 Detection Classes")
+    st.subheader(
+        "📊 Severity Levels"
+    )
 
-    st.write("🟢 No Detection")
-    st.write("🟡 Low / Moderate")
-    st.write("🔴 High")
+    st.write(
+        "⚪ No Detection"
+    )
+
+    st.write(
+        "🟢 Low"
+    )
+
+    st.write(
+        "🟡 Moderate"
+    )
+
+    st.write(
+        "🔴 High"
+    )
 
     st.divider()
 
-    st.subheader("Project Status")
+    st.subheader(
+        "Project Status"
+    )
 
-    st.success("Model Ready")
-    st.success("Cloud Deployment Ready")
+    st.success(
+        "Model Ready"
+    )
+
+    st.success(
+        "Dashboard Ready"
+    )
+
+    st.success(
+        "Cloud Deployment Ready"
+    )
 
     st.divider()
 
@@ -926,16 +1162,25 @@ with st.sidebar:
 
 
 # ============================================================
-# UPLOAD
+# FILE UPLOAD
 # ============================================================
 
-st.header("📡 Satellite Image Analysis")
+st.header(
+    "📡 Satellite Image Analysis"
+)
 
 uploaded_file = st.file_uploader(
     "Upload an 11-band Sentinel-2 GeoTIFF",
-    type=["tif", "tiff"]
+    type=[
+        "tif",
+        "tiff"
+    ]
 )
 
+
+# ============================================================
+# APPLICATION
+# ============================================================
 
 if uploaded_file is not None:
 
@@ -944,7 +1189,7 @@ if uploaded_file is not None:
     try:
 
         # ----------------------------------------------------
-        # TEMP FILE
+        # SAVE TEMPORARY FILE
         # ----------------------------------------------------
 
         with tempfile.NamedTemporaryFile(
@@ -982,17 +1227,15 @@ if uploaded_file is not None:
 
             resolution = src.res
 
-            transform = src.transform
-
         # ----------------------------------------------------
-        # VALIDATION
+        # VALIDATE BAND COUNT
         # ----------------------------------------------------
 
         if band_count != EXPECTED_BANDS:
 
             st.error(
                 f"Expected {EXPECTED_BANDS} bands, "
-                f"but this image contains {band_count}."
+                f"but this image contains {band_count} bands."
             )
 
             st.stop()
@@ -1002,10 +1245,12 @@ if uploaded_file is not None:
         )
 
         # ----------------------------------------------------
-        # IMAGE METADATA
+        # SATELLITE METADATA
         # ----------------------------------------------------
 
-        st.header("🛰️ Satellite Metadata")
+        st.header(
+            "🛰️ Satellite Metadata"
+        )
 
         c1, c2, c3, c4 = st.columns(4)
 
@@ -1033,9 +1278,9 @@ if uploaded_file is not None:
             "🌍 Complete Geospatial Metadata"
         ):
 
-            metadata_col1, metadata_col2 = st.columns(2)
+            m1, m2 = st.columns(2)
 
-            with metadata_col1:
+            with m1:
 
                 st.write(
                     f"**CRS:** {crs}"
@@ -1053,7 +1298,7 @@ if uploaded_file is not None:
                     f"**Height:** {height}"
                 )
 
-            with metadata_col2:
+            with m2:
 
                 st.write(
                     f"**Left:** {bounds.left}"
@@ -1072,14 +1317,16 @@ if uploaded_file is not None:
                 )
 
         # ----------------------------------------------------
-        # TRUE COLOR
+        # TRUE COLOR IMAGE
         # ----------------------------------------------------
 
         rgb = create_true_color(
             image
         )
 
-        st.header("🖼️ Satellite Image")
+        st.header(
+            "🖼️ Satellite Image"
+        )
 
         st.image(
             rgb,
@@ -1088,7 +1335,7 @@ if uploaded_file is not None:
         )
 
         # ----------------------------------------------------
-        # ANALYZE
+        # ANALYZE BUTTON
         # ----------------------------------------------------
 
         st.divider()
@@ -1101,46 +1348,54 @@ if uploaded_file is not None:
 
         if analyze:
 
-            model, error = load_model()
+            # ------------------------------------------------
+            # LOAD MODEL
+            # ------------------------------------------------
 
-            if error is not None:
+            model, model_error = load_model()
+
+            if model_error is not None:
 
                 st.error(
-                    f"Model loading failed: {error}"
+                    f"Model loading failed: {model_error}"
                 )
 
                 st.stop()
 
             # ------------------------------------------------
-            # PREPROCESSING
-            # ------------------------------------------------
-
-            normalized = normalize_image(
-                image
-            )
-
-            tensor = torch.from_numpy(
-                normalized
-            ).float()
-
-            tensor = tensor.unsqueeze(0)
-
-            tensor = F.interpolate(
-                tensor,
-                size=(
-                    INPUT_SIZE,
-                    INPUT_SIZE
-                ),
-                mode="bilinear",
-                align_corners=False
-            )
-
-            # ------------------------------------------------
-            # PREDICTION
+            # NORMALIZATION
             # ------------------------------------------------
 
             with st.spinner(
-                "🤖 OceanMind AI is analyzing the satellite image..."
+                "🔧 Preprocessing satellite imagery..."
+            ):
+
+                normalized = normalize_image(
+                    image
+                )
+
+                tensor = torch.from_numpy(
+                    normalized
+                ).float()
+
+                tensor = tensor.unsqueeze(0)
+
+                tensor = F.interpolate(
+                    tensor,
+                    size=(
+                        INPUT_SIZE,
+                        INPUT_SIZE
+                    ),
+                    mode="bilinear",
+                    align_corners=False
+                )
+
+            # ------------------------------------------------
+            # MODEL PREDICTION
+            # ------------------------------------------------
+
+            with st.spinner(
+                "🤖 OceanMind AI is analyzing the image..."
             ):
 
                 with torch.no_grad():
@@ -1161,10 +1416,11 @@ if uploaded_file is not None:
             )
 
             # ------------------------------------------------
-            # RESIZE TO ORIGINAL
+            # RESIZE TO ORIGINAL IMAGE
             # ------------------------------------------------
 
             probability_original = np.array(
+
                 Image.fromarray(
                     probability.astype(
                         np.float32
@@ -1177,10 +1433,11 @@ if uploaded_file is not None:
                     ),
                     Image.Resampling.BILINEAR
                 )
+
             )
 
             # ------------------------------------------------
-            # MASK
+            # CREATE MASK
             # ------------------------------------------------
 
             mask = (
@@ -1191,7 +1448,7 @@ if uploaded_file is not None:
             )
 
             # ------------------------------------------------
-            # STATISTICS
+            # CALCULATE STATISTICS
             # ------------------------------------------------
 
             debris_pixels = int(
@@ -1242,18 +1499,8 @@ if uploaded_file is not None:
                 )
 
             # ------------------------------------------------
-            # GEOGRAPHIC CENTER
+            # GEOGRAPHIC COORDINATES
             # ------------------------------------------------
-
-            center_x = (
-                bounds.left +
-                bounds.right
-            ) / 2
-
-            center_y = (
-                bounds.bottom +
-                bounds.top
-            ) / 2
 
             try:
 
@@ -1267,44 +1514,60 @@ if uploaded_file is not None:
                 )
 
                 lon_min = geographic_bounds[0]
+
                 lat_min = geographic_bounds[1]
+
                 lon_max = geographic_bounds[2]
+
                 lat_max = geographic_bounds[3]
 
                 center_lon = (
-                    lon_min + lon_max
+                    lon_min +
+                    lon_max
                 ) / 2
 
                 center_lat = (
-                    lat_min + lat_max
+                    lat_min +
+                    lat_max
                 ) / 2
+
+                geographic_available = True
 
             except Exception:
 
-                center_lon = center_x
-                center_lat = center_y
+                center_lon = 0.0
 
-                lon_min = center_x
-                lon_max = center_x
-                lat_min = center_y
-                lat_max = center_y
+                center_lat = 0.0
+
+                geographic_available = False
 
             # ------------------------------------------------
             # SAVE HISTORY
             # ------------------------------------------------
 
             history_record = {
-                "Image": uploaded_file.name,
-                "Detected Area (%)": round(
-                    area_percentage,
-                    4
-                ),
-                "Debris Pixels": debris_pixels,
-                "Confidence (%)": round(
-                    confidence,
-                    2
-                ),
-                "Severity": severity
+
+                "Image":
+                    uploaded_file.name,
+
+                "Detected Area (%)":
+                    round(
+                        area_percentage,
+                        4
+                    ),
+
+                "Debris Pixels":
+                    debris_pixels,
+
+                "Confidence (%)":
+                    round(
+                        confidence,
+                        2
+                    ),
+
+                "Severity":
+                    severity
+
             }
 
             st.session_state.history.append(
@@ -1367,14 +1630,12 @@ if uploaded_file is not None:
 
             st.markdown(
                 f"""
-                <div class="{severity_class(severity)}">
+                <div class="{get_severity_class(severity)}">
                     {severity}
                 </div>
                 """,
                 unsafe_allow_html=True
             )
-
-            st.write("")
 
             # ------------------------------------------------
             # POLLUTION STATISTICS
@@ -1416,29 +1677,35 @@ if uploaded_file is not None:
                 )
 
                 st.write(
-                    f"**Severity classification:** "
+                    f"**Severity:** "
                     f"{severity}"
                 )
 
+            # ------------------------------------------------
+            # COVERAGE VISUALIZATION
+            # ------------------------------------------------
+
+            coverage_value = min(
+                area_percentage / 1.0,
+                1.0
+            )
+
             st.progress(
-                min(
-                    area_percentage / 1.0,
-                    1.0
-                )
+                coverage_value
             )
 
             st.caption(
-                "The progress bar is normalized to "
-                "1% detected coverage for visualization."
+                "Coverage bar is normalized to 1% "
+                "detected area."
             )
 
             # ------------------------------------------------
-            # CONFIDENCE NOTE
+            # CONFIDENCE WARNING
             # ------------------------------------------------
 
             st.info(
-                "AI Confidence represents the model's "
-                "predicted probability for detected pixels. "
+                "AI Confidence is the model's predicted "
+                "probability for detected pixels. "
                 "It is not validated real-world accuracy."
             )
 
@@ -1450,54 +1717,58 @@ if uploaded_file is not None:
                 "🗺️ Geographic Location"
             )
 
-            st.write(
-                "Approximate center of the uploaded "
-                "satellite scene:"
-            )
+            if geographic_available:
 
-            map_data = pd.DataFrame(
-                {
-                    "latitude": [
-                        center_lat
-                    ],
-                    "longitude": [
-                        center_lon
-                    ]
-                }
-            )
+                map_data = pd.DataFrame(
+                    {
+                        "latitude": [
+                            center_lat
+                        ],
 
-            st.map(
-                map_data,
-                latitude="latitude",
-                longitude="longitude",
-                zoom=8
-            )
-
-            map_c1, map_c2 = st.columns(2)
-
-            with map_c1:
-
-                st.write(
-                    f"**Latitude:** "
-                    f"{center_lat:.6f}"
+                        "longitude": [
+                            center_lon
+                        ]
+                    }
                 )
 
-            with map_c2:
-
-                st.write(
-                    f"**Longitude:** "
-                    f"{center_lon:.6f}"
+                st.map(
+                    map_data,
+                    latitude="latitude",
+                    longitude="longitude",
+                    zoom=8
                 )
 
-            st.caption(
-                "The map shows the geographic center "
-                "of the satellite patch. The model "
-                "currently performs pixel-level detection "
-                "within the uploaded scene."
-            )
+                map1, map2 = st.columns(2)
+
+                with map1:
+
+                    st.metric(
+                        "Latitude",
+                        f"{center_lat:.6f}"
+                    )
+
+                with map2:
+
+                    st.metric(
+                        "Longitude",
+                        f"{center_lon:.6f}"
+                    )
+
+                st.caption(
+                    "The map displays the approximate "
+                    "geographic center of the satellite patch."
+                )
+
+            else:
+
+                st.warning(
+                    "The uploaded GeoTIFF does not provide "
+                    "a geographic CRS that could be converted "
+                    "to latitude/longitude."
+                )
 
             # ------------------------------------------------
-            # RESULTS
+            # SEGMENTATION
             # ------------------------------------------------
 
             st.header(
@@ -1542,6 +1813,17 @@ if uploaded_file is not None:
                 format="PNG"
             )
 
+            # ------------------------------------------------
+            # DOWNLOAD OVERLAY
+            # ------------------------------------------------
+
+            overlay_buffer = BytesIO()
+
+            overlay_image.save(
+                overlay_buffer,
+                format="PNG"
+            )
+
             d1, d2 = st.columns(2)
 
             with d1:
@@ -1554,17 +1836,6 @@ if uploaded_file is not None:
                     use_container_width=True
                 )
 
-            # ------------------------------------------------
-            # DOWNLOAD OVERLAY
-            # ------------------------------------------------
-
-            overlay_buffer = BytesIO()
-
-            overlay_image.save(
-                overlay_buffer,
-                format="PNG"
-            )
-
             with d2:
 
                 st.download_button(
@@ -1576,37 +1847,73 @@ if uploaded_file is not None:
                 )
 
             # ------------------------------------------------
-            # PDF
+            # PDF REPORT
             # ------------------------------------------------
 
             st.header(
                 "📄 Professional Analysis Report"
             )
 
+            if geographic_available:
+
+                pdf_latitude = center_lat
+
+                pdf_longitude = center_lon
+
+            else:
+
+                pdf_latitude = 0.0
+
+                pdf_longitude = 0.0
+
             try:
 
                 pdf_data = create_pdf_report(
+
                     filename=uploaded_file.name,
+
                     width=width,
+
                     height=height,
+
                     bands=band_count,
+
                     crs=crs,
+
                     bounds=bounds,
+
+                    latitude=pdf_latitude,
+
+                    longitude=pdf_longitude,
+
                     debris_pixels=debris_pixels,
+
                     total_pixels=total_pixels,
+
                     area_percentage=area_percentage,
+
                     confidence=confidence,
+
                     severity=severity,
+
                     threshold=THRESHOLD,
+
                     max_probability=max_probability
+
                 )
 
                 st.download_button(
+
                     "📄 Download Professional PDF Report",
+
                     data=pdf_data,
+
                     file_name="OceanMind_AI_Report.pdf",
+
                     mime="application/pdf",
+
                     use_container_width=True
+
                 )
 
             except Exception as e:
@@ -1616,7 +1923,7 @@ if uploaded_file is not None:
                 )
 
             # ------------------------------------------------
-            # ANALYSIS PIPELINE
+            # AI PIPELINE
             # ------------------------------------------------
 
             st.divider()
@@ -1626,79 +1933,60 @@ if uploaded_file is not None:
             )
 
             pipeline = [
+
                 "🛰️ 11-band Sentinel-2 GeoTIFF",
+
                 "⬇️",
+
                 "🔧 Band-wise normalization",
+
                 "⬇️",
+
                 "📐 Resize to 128 × 128",
+
                 "⬇️",
+
                 "🧠 U-Net CNN",
+
                 "⬇️",
+
                 "🎯 Pixel-wise probability map",
+
                 "⬇️",
+
                 "✂️ Threshold = 0.50",
+
                 "⬇️",
+
                 "🚨 Marine debris segmentation",
+
                 "⬇️",
-                "📊 Statistics + Severity + Map + Report"
+
+                "📊 Pollution statistics",
+
+                "⬇️",
+
+                "⚠️ Severity classification",
+
+                "⬇️",
+
+                "🗺️ Geographic visualization",
+
+                "⬇️",
+
+                "📄 Professional PDF report"
+
             ]
 
             for step in pipeline:
 
                 st.write(step)
 
-    # ========================================================
-    # HISTORY
-    # ========================================================
+    except Exception as e:
 
-    if len(
-        st.session_state.history
-    ) > 0:
-
-        st.divider()
-
-        st.header(
-            "📜 Detection History"
+        st.error(
+            f"Error processing the satellite image: {e}"
         )
-
-        history_df = pd.DataFrame(
-            st.session_state.history
-        )
-
-        st.dataframe(
-            history_df,
-            use_container_width=True,
-            hide_index=True
-        )
-
-        if st.button(
-            "🗑️ Clear Detection History"
-        ):
-
-            st.session_state.history = []
-
-            st.rerun()
-
-    # ========================================================
-    # FOOTER
-    # ========================================================
-
-    st.divider()
-
-    st.caption(
-        "🌊 OceanMind AI | AI-Based Marine Pollution "
-        "Detection using Sentinel-2 Satellite Imagery"
-    )
-
-    st.caption(
-        "Research prototype — results should be validated "
-        "before real-world environmental decisions."
-    )
-
-
-    # ========================================================
-    # CLEAN TEMP FILE
-    # ========================================================
 
     finally:
 
@@ -1710,6 +1998,56 @@ if uploaded_file is not None:
                     temp_path
                 )
 
-            except:
+            except Exception:
 
                 pass
+
+
+# ============================================================
+# DETECTION HISTORY
+# ============================================================
+
+if len(
+    st.session_state.history
+) > 0:
+
+    st.divider()
+
+    st.header(
+        "📜 Detection History"
+    )
+
+    history_df = pd.DataFrame(
+        st.session_state.history
+    )
+
+    st.dataframe(
+        history_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    if st.button(
+        "🗑️ Clear Detection History"
+    ):
+
+        st.session_state.history = []
+
+        st.rerun()
+
+
+# ============================================================
+# FOOTER
+# ============================================================
+
+st.divider()
+
+st.caption(
+    "🌊 OceanMind AI | AI-Based Marine Pollution "
+    "Detection using Sentinel-2 Satellite Imagery"
+)
+
+st.caption(
+    "Research prototype — results should be validated "
+    "before real-world environmental decisions."
+)
