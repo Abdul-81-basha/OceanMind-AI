@@ -29,7 +29,7 @@ st.set_page_config(
 # SETTINGS
 # ============================================================
 
-MODEL_PATH = "outputs/marine_debris_segmentation.pth"
+MODEL_PATH = "marine_debris_segmentation.pth"
 
 IMAGE_SIZE = 128
 
@@ -632,6 +632,7 @@ temporary = tempfile.NamedTemporaryFile(
     suffix=suffix
 )
 
+
 temporary.write(
     uploaded_file.getbuffer()
 )
@@ -699,12 +700,14 @@ st.header(
 
 c1, c2, c3, c4 = st.columns(4)
 
+
 with c1:
 
     st.metric(
         "Bands",
         bands
     )
+
 
 with c2:
 
@@ -713,12 +716,14 @@ with c2:
         width
     )
 
+
 with c3:
 
     st.metric(
         "Height",
         height
     )
+
 
 with c4:
 
@@ -1253,35 +1258,46 @@ before operational environmental decisions.
         "🔄 Analysis Pipeline"
     )
 
+
     st.success(
         "Satellite Image"
     )
 
+
     st.write("↓")
+
 
     st.success(
         "11-Band Preprocessing"
     )
 
+
     st.write("↓")
+
 
     st.success(
         "U-Net Deep Learning"
     )
 
+
     st.write("↓")
+
 
     st.success(
         "Pixel Segmentation"
     )
 
+
     st.write("↓")
+
 
     st.success(
         "Marine Debris Detection"
     )
 
+
     st.write("↓")
+
 
     st.success(
         "Pollution Severity Assessment"
@@ -1311,4 +1327,4 @@ st.divider()
 
 st.caption(
     "🌊 OceanMind AI | AI-Based Marine Pollution Detection"
-) 
+)
