@@ -1,233 +1,93 @@
+
+from pathlib import Path
+
+import numpy as np
 import torch
-import torch.nn as nn
-
 from torch.utils.data import DataLoader
+from sklearn.metrics import confusion_matrix
 
-from torchvision.models import vit_b_16
+from dataset_loader import MARIDADataset
+from unet_model import UNet
 
-from full_dataset import FullMARIDADataset
+ROOT = Path("data/raw")
+MODEL_PATH = Path("outputs/marine_debris_segmentation.pth")
+NUM_CLASSES = 15
+IGNORE_INDEX = 255
+BATCH_SIZE = 2
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Device:", device)
 
-# ==========================================
-# 1. Load TEST dataset
-# ==========================================
-
-test_dataset = FullMARIDADataset(
-    "splits/test_X.txt",
-    max_samples=100
+dataset = MARIDADataset(root=str(ROOT), split="test")
+loader = DataLoader(
+    dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0
 )
 
-print()
-print("Test samples:", len(test_dataset))
+model = UNet(in_channels=11, num_classes=NUM_CLASSES).to(device)
 
+# Accept either a plain state dictionary or a wrapped checkpoint.
+checkpoint = torch.load(MODEL_PATH, map_location=device, weights_only=True)
 
-# ==========================================
-# 2. DataLoader
-# ==========================================
+if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+    state_dict = checkpoint["model_state_dict"]
+else:
+    state_dict = checkpoint
 
-test_loader = DataLoader(
-    test_dataset,
-    batch_size=4,
-    shuffle=False
-)
-
-
-# ==========================================
-# 3. Create Vision Transformer
-# ==========================================
-
-model = vit_b_16(weights=None)
-
-model.heads.head = nn.Linear(
-    model.heads.head.in_features,
-    2
-)
-
-
-# ==========================================
-# 4. Load WEIGHTED model
-# ==========================================
-
-model.load_state_dict(
-    torch.load(
-        "outputs/marine_debris_vit_weighted.pth",
-        map_location="cpu"
-    )
-)
-
+model.load_state_dict(state_dict)
 model.eval()
 
-
-# ==========================================
-# 5. Evaluation
-# ==========================================
-
-correct = 0
-total = 0
-
-true_positive = 0
-true_negative = 0
-false_positive = 0
-false_negative = 0
-
+cm = np.zeros((NUM_CLASSES, NUM_CLASSES), dtype=np.int64)
 
 with torch.no_grad():
+    for batch_no, (images, masks) in enumerate(loader, start=1):
+        images = images.to(device)
+        masks = masks.to(device)
 
-    for images, labels in test_loader:
+        predictions = model(images).argmax(dim=1)
 
-        outputs = model(images)
+        valid = masks != IGNORE_INDEX
+        y_true = masks[valid].cpu().numpy()
+        y_pred = predictions[valid].cpu().numpy()
 
-        predictions = outputs.argmax(
-            dim=1
-        )
+        if len(y_true):
+            cm += confusion_matrix(
+                y_true,
+                y_pred,
+                labels=list(range(NUM_CLASSES))
+            )
 
-        # Accuracy
-        correct += (
-            predictions == labels
-        ).sum().item()
+        if batch_no % 50 == 0:
+            print(f"Evaluated {batch_no}/{len(loader)} batches")
 
-        total += labels.size(0)
+support = cm.sum(axis=1)
+correct = np.diag(cm)
+total = cm.sum()
 
-        # Confusion matrix
-        for prediction, label in zip(
-            predictions,
-            labels
-        ):
+accuracy = correct.sum() / total if total else 0.0
 
-            prediction = prediction.item()
-            label = label.item()
+print("\nTest pixels evaluated:", int(total))
+print(f"Pixel accuracy: {accuracy:.4f}")
+print("\nClass ID | Support | Precision | Recall | Dice")
 
-            if prediction == 1 and label == 1:
+dice_scores = []
 
-                true_positive += 1
+for i in range(NUM_CLASSES):
+    tp = cm[i, i]
+    fp = cm[:, i].sum() - tp
+    fn = cm[i, :].sum() - tp
 
-            elif prediction == 0 and label == 0:
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    dice = 2 * tp / (2 * tp + fp + fn) if 2 * tp + fp + fn else 0.0
 
-                true_negative += 1
+    if support[i] > 0:
+        dice_scores.append(dice)
 
-            elif prediction == 1 and label == 0:
-
-                false_positive += 1
-
-            elif prediction == 0 and label == 1:
-
-                false_negative += 1
-
-
-# ==========================================
-# 6. Calculate metrics
-# ==========================================
-
-accuracy = correct / total
-
-
-if true_positive + false_positive > 0:
-
-    precision = (
-        true_positive
-        /
-        (true_positive + false_positive)
+    print(
+        f"{i + 1:8} | {support[i]:7} | "
+        f"{precision:.4f}    | {recall:.4f} | {dice:.4f}"
     )
 
-else:
+mean_dice = np.mean(dice_scores) if dice_scores else 0.0
+print(f"\nMean Dice (classes with test support): {mean_dice:.4f}")
 
-    precision = 0
-
-
-if true_positive + false_negative > 0:
-
-    recall = (
-        true_positive
-        /
-        (true_positive + false_negative)
-    )
-
-else:
-
-    recall = 0
-
-
-if precision + recall > 0:
-
-    f1 = (
-        2 * precision * recall
-        /
-        (precision + recall)
-    )
-
-else:
-
-    f1 = 0
-
-
-# ==========================================
-# 7. Results
-# ==========================================
-
-print()
-print("================================")
-print("WEIGHTED MARIDA TEST RESULTS")
-print("================================")
-
-print(
-    f"Test Accuracy:  {accuracy:.2f}"
-)
-
-print(
-    f"Precision:      {precision:.2f}"
-)
-
-print(
-    f"Recall:         {recall:.2f}"
-)
-
-print(
-    f"F1 Score:       {f1:.2f}"
-)
-
-
-print()
-print("Confusion Matrix")
-print("----------------")
-
-print(
-    f"True Negative:  {true_negative}"
-)
-
-print(
-    f"False Positive: {false_positive}"
-)
-
-print(
-    f"False Negative: {false_negative}"
-)
-
-print(
-    f"True Positive:  {true_positive}"
-)
-
-
-# ==========================================
-# 8. Marine Debris Detection Rate
-# ==========================================
-
-actual_debris = (
-    true_positive + false_negative
-)
-
-detected_debris = true_positive
-
-
-print()
-print("Marine Debris Detection")
-print("------------------------")
-
-print(
-    f"Actual debris samples: "
-    f"{actual_debris}"
-)
-
-print(
-    f"Detected debris samples: "
-    f"{detected_debris}"
-)

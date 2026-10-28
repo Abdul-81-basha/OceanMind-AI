@@ -1,102 +1,12 @@
 import json
-from collections import Counter
+from pathlib import Path
 
+p = Path("data/raw/labels_mapping.txt")
+data = json.loads(p.read_text(encoding="utf-8-sig"))
 
-# ==========================================
-# Load MARIDA label mapping
-# ==========================================
+print("Total image entries:", len(data))
 
-with open(
-    "labels_mapping.txt",
-    "r"
-) as f:
+for filename, labels in list(data.items())[:5]:
+    print(filename, "->", labels)
 
-    labels = json.load(f)
-
-
-print()
-print("================================")
-print("MARIDA LABEL DISTRIBUTION")
-print("================================")
-
-print(
-    "Total labeled patches:",
-    len(labels)
-)
-
-
-# ==========================================
-# Count Marine Debris
-# ==========================================
-
-debris = 0
-non_debris = 0
-
-
-for filename, classes in labels.items():
-
-    # First position = Marine Debris
-    if classes[0] == 1:
-
-        debris += 1
-
-    else:
-
-        non_debris += 1
-
-
-print()
-print(
-    "Marine Debris:",
-    debris
-)
-
-print(
-    "Non-Marine-Debris:",
-    non_debris
-)
-
-
-# ==========================================
-# Percentages
-# ==========================================
-
-total = debris + non_debris
-
-if total > 0:
-
-    print()
-
-    print(
-        f"Marine Debris %: "
-        f"{(debris / total) * 100:.2f}%"
-    )
-
-    print(
-        f"Non-Debris %: "
-        f"{(non_debris / total) * 100:.2f}%"
-    )
-
-
-# ==========================================
-# Show examples
-# ==========================================
-
-print()
-print("Examples:")
-print("--------------------------------")
-
-count = 0
-
-for filename, classes in labels.items():
-
-    print(
-        filename,
-        "MarineDebris =",
-        classes[0]
-    )
-
-    count += 1
-
-    if count >= 10:
-        break 
+print("Label vector lengths:", sorted(set(len(v) for v in data.values())))

@@ -1,56 +1,49 @@
-# 🌊 OceanMind AI
-**Live Demo:**  
-https://oceanmind-ai-eoupyhve7q2ildamdroszq.streamlit.app/
+# OceanMind AI 2.0 — Frontend
 
-## AI-Based Marine Pollution Detection & Monitoring
+Next.js frontend scaffold for a U-Net multi-class marine-pollution segmentation platform.
 
-OceanMind AI is an artificial intelligence system designed to detect and monitor marine pollution, particularly floating marine debris, using multispectral Sentinel-2 satellite imagery.
+## Requirements
+- Node.js 20.9+ recommended
+- A running OceanMind FastAPI backend for real inference
 
-The system uses an 11-band satellite image as input and applies a U-Net deep learning model to generate a pixel-level marine debris detection mask.
+## Run locally
+1. Open a terminal in this folder.
+2. Install dependencies: `npm install`
+3. Copy `.env.example` to `.env.local`.
+4. Keep `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000` for local FastAPI.
+5. Start the frontend: `npm run dev`
+6. Open http://localhost:3000.
 
----
+## Backend contract expected by the frontend
+`POST /predict` as multipart/form-data:
+- `file`: uploaded image
+- `sensor_type`: `optical` or `sar`
 
-## 🎯 Problem Statement
+Expected JSON response schema example (not a real prediction):
+```json
+{
+  "pollution_type": "Marine debris",
+  "severity": "Low",
+  "pollution_area_percent": 0.42,
+  "confidence": 0.81,
+  "dice": 0.67,
+  "class_percentages": {
+    "Marine debris": 0.42,
+    "Oil spill": 0.0,
+    "Other pollution": 0.0,
+    "Background": 99.58
+  },
+  "mask_url": "/results/example-mask.png",
+  "overlay_url": "/results/example-overlay.png"
+}
+```
+The backend must return real model outputs. This frontend does not run inference in the browser. GeoTIFF decoding and U-Net inference belong in the backend. FastAPI must enable CORS for your Vercel origin.
 
-Marine pollution caused by floating debris is difficult to monitor over large ocean and coastal areas using conventional ground-based methods.
+## Deploy to Vercel
+1. Push this folder to GitHub.
+2. Import the repository in Vercel.
+3. Set Root Directory to the folder containing this package.json.
+4. Set `NEXT_PUBLIC_API_URL` to your deployed Render API URL.
+5. Deploy.
 
-OceanMind AI provides an automated satellite-based approach for detecting potential marine debris and visualizing detected pollution areas.
-
----
-
-## 🚀 Key Features
-
-- 🛰️ Sentinel-2 multispectral satellite image analysis
-- 🌈 11-band satellite image processing
-- 🤖 U-Net deep learning segmentation
-- 🔍 Pixel-level marine debris detection
-- 📊 Pollution area estimation
-- 🗺️ Geographic scene visualization
-- 📈 Detection severity classification
-- 🖼️ Prediction mask and overlay visualization
-- 📄 Automatic detection report
-- ⬇️ Downloadable prediction results
-- 🌐 Streamlit web dashboard
-
----
-
-## 🧠 AI Model
-
-The project uses a **U-Net Convolutional Neural Network (CNN)** for semantic segmentation.
-
-### Architecture
-
-```text
-11-Band Sentinel-2 Image
-          ↓
-       Encoder
-          ↓
-      Bottleneck
-          ↓
-       Decoder
-          ↓
-   Skip Connections
-          ↓
-  1-Channel Prediction
-          ↓
- Marine Debris Mask
+Keep large datasets and model checkpoints out of GitHub.

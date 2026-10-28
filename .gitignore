@@ -1,12 +1,45 @@
+node_modules/
+.next/
+out/
+.env
+.env.local
+*.log
+.DS_Store
+
+# Python generated files
+__pycache__/
+*.py[cod]
 venv/
 .venv/
+backend/venv/
+
+# Local development files
+.env
+.env.local
+node_modules/
+.next/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python environments and caches
 __pycache__/
-*.pyc
+*.py[cod]
+venv/
+.venv/
+backend/venv/
 
-patches/
-dataset/
-outputs/
-splits/
+# Generated development files
+.next/
+node_modules/
+.env
+.env.local
 
-.ipynb_checkpoints/
-.streamlit/secrets.toml
+# Generated prediction outputs
+backend/outputs/
+outputs/predictions/
+
+# OS files
+.DS_Store
+Thumbs.db

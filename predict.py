@@ -1,129 +1,80 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+
+from pathlib import Path
+
+import numpy as np
 import rasterio
+import torch
 
-from torchvision.models import vit_b_16
+from dataset_loader import MARIDADataset
+from unet_model import UNet
+
+ROOT = Path("data/raw")
+MODEL_PATH = Path("outputs/marine_debris_segmentation.pth")
+OUTPUT_DIR = Path("outputs/predictions")
+NUM_CLASSES = 15
+IGNORE_INDEX = 255
 
 
-# -----------------------------
-# Load satellite image
-# -----------------------------
+def main():
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() else "cpu"
+    )
+    print("Device:", device)
 
-def load_image(path):
+    dataset = MARIDADataset(root=str(ROOT), split="test")
+    image, target = dataset[0]
+    sample_id = dataset.ids[0]
 
-    with rasterio.open(path) as src:
-        image = src.read().astype("float32")
+    model = UNet(in_channels=11, num_classes=NUM_CLASSES).to(device)
 
-    # Normalize each band
-    for band in range(image.shape[0]):
-
-        minimum = image[band].min()
-        maximum = image[band].max()
-
-        if maximum > minimum:
-            image[band] = (
-                (image[band] - minimum)
-                / (maximum - minimum)
-            )
-
-    image = torch.tensor(image)
-
-    # RGB
-    image = image[[2, 1, 0]]
-
-    # Add batch dimension
-    image = image.unsqueeze(0)
-
-    # Resize
-    image = F.interpolate(
-        image,
-        size=(224, 224),
-        mode="bilinear",
-        align_corners=False
+    checkpoint = torch.load(
+        MODEL_PATH, map_location=device, weights_only=True
+    )
+    state_dict = (
+        checkpoint["model_state_dict"]
+        if "model_state_dict" in checkpoint
+        else checkpoint
     )
 
-    return image
+    model.load_state_dict(state_dict)
+    model.eval()
 
+    with torch.no_grad():
+        logits = model(image.unsqueeze(0).to(device))
+        prediction = logits.argmax(dim=1).squeeze(0).cpu().numpy()
 
-# -----------------------------
-# Create model
-# -----------------------------
+    # Convert model IDs 0-14 back to MARIDA IDs 1-15.
+    prediction = prediction.astype(np.uint8) + 1
 
-model = vit_b_16(weights=None)
+    # Preserve unlabeled areas as 0 for visualization.
+    valid = target.numpy() != IGNORE_INDEX
+    prediction[~valid] = 0
 
-model.heads.head = nn.Linear(
-    model.heads.head.in_features,
-    2
-)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = OUTPUT_DIR / f"{sample_id}_prediction.tif"
 
+    with rasterio.open(
+        next((ROOT / "patches").rglob(f"S2_{sample_id}.tif"))
+    ) as src:
+        profile = src.profile.copy()
 
-# -----------------------------
-# Load saved model
-# -----------------------------
-
-model.load_state_dict(
-    torch.load(
-        "outputs/marine_debris_vit.pth",
-        map_location="cpu"
-    )
-)
-
-model.eval()
-
-
-# -----------------------------
-# Select image to test
-# -----------------------------
-
-image_path = (
-    "dataset/raw/S2_1-12-19_48MYU_2.tif"
-)
-
-image = load_image(image_path)
-
-
-# -----------------------------
-# Prediction
-# -----------------------------
-
-with torch.no_grad():
-
-    output = model(image)
-
-    probabilities = torch.softmax(
-        output,
-        dim=1
+    profile.update(
+        driver="GTiff",
+        count=1,
+        dtype="uint8",
+        height=prediction.shape[0],
+        width=prediction.shape[1],
     )
 
-    prediction = probabilities.argmax(
-        dim=1
-    ).item()
+    with rasterio.open(output_path, "w", **profile) as dst:
+        dst.write(prediction, 1)
+
+    print("Test sample:", sample_id)
+    print("Prediction shape:", prediction.shape)
+    print("Predicted MARIDA class IDs:", np.unique(prediction).tolist())
+    print("Saved prediction:", output_path)
 
 
-# -----------------------------
-# Display result
-# -----------------------------
+if __name__ == "__main__":
+    main()
 
-print()
-print("Prediction")
-print("-----------------------")
-
-print(
-    "Non-Marine-Debris:",
-    f"{probabilities[0][0].item() * 100:.2f}%"
-)
-
-print(
-    "Marine-Debris:",
-    f"{probabilities[0][1].item() * 100:.2f}%"
-)
-
-print()
-
-if prediction == 1:
-    print("Result: MARINE DEBRIS")
-else:
-    print("Result: NON-MARINE-DEBRIS")
-
-    
