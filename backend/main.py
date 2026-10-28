@@ -1,7 +1,7 @@
-﻿from pathlib import Path
+
+from pathlib import Path
 import sys
 import uuid
-import io
 
 import numpy as np
 import rasterio
@@ -21,14 +21,22 @@ from unet_model import UNet
 
 app = FastAPI(title="OceanMind AI 2.0")
 
-app.mount("/outputs", StaticFiles(directory=str(OUTPUT_DIR)), name="outputs")
-
+# Allow the deployed frontend and local development environments.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"],
+    allow_origins=[
+        "https://ocean-mind-ai.vercel.app",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+    ],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/outputs", StaticFiles(directory=str(OUTPUT_DIR)), name="outputs")
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = None
@@ -75,20 +83,30 @@ CLASS_COLORS = {
 @app.on_event("startup")
 def load_model():
     global model
+
     if not MODEL_PATH.exists():
         print(f"Model checkpoint not found: {MODEL_PATH}")
         return
 
     net = UNet(in_channels=11, num_classes=15).to(DEVICE)
-    checkpoint = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=True)
+
+    checkpoint = torch.load(
+        MODEL_PATH,
+        map_location=DEVICE,
+        weights_only=True,
+    )
+
     state_dict = (
         checkpoint["model_state_dict"]
-        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint
+        if isinstance(checkpoint, dict)
+        and "model_state_dict" in checkpoint
         else checkpoint
     )
+
     net.load_state_dict(state_dict)
     net.eval()
     model = net
+
     print(f"OceanMind U-Net loaded on {DEVICE}")
 
 
@@ -108,19 +126,22 @@ def health():
 
 def make_rgb_preview(image):
     # Sentinel-2-style RGB: bands 4, 3, 2 (1-based).
-    # This assumes the uploaded GeoTIFF follows that band ordering.
     rgb = image[[3, 2, 1]].astype(np.float32)
     channels = []
 
     for band in rgb:
         valid = band[np.isfinite(band)]
+
         if valid.size == 0:
             channels.append(np.zeros(band.shape, dtype=np.uint8))
             continue
 
         low, high = np.percentile(valid, [2, 98])
         scaled = (band - low) / max(float(high - low), 1e-6)
-        channels.append((np.clip(scaled, 0, 1) * 255).astype(np.uint8))
+
+        channels.append(
+            (np.clip(scaled, 0, 1) * 255).astype(np.uint8)
+        )
 
     return np.stack(channels, axis=-1)
 
@@ -131,12 +152,19 @@ async def predict(
     sensor_type: str = Form("optical"),
 ):
     if sensor_type != "optical":
-        raise HTTPException(400, "This checkpoint supports 11-band optical input only.")
+        raise HTTPException(
+            400,
+            "This checkpoint supports 11-band optical input only.",
+        )
 
     if model is None:
-        raise HTTPException(503, "Model checkpoint could not be loaded.")
+        raise HTTPException(
+            503,
+            "Model checkpoint could not be loaded.",
+        )
 
     filename = (file.filename or "").lower()
+
     if not filename.endswith((".tif", ".tiff")):
         raise HTTPException(
             400,
@@ -145,6 +173,7 @@ async def predict(
         )
 
     content = await file.read()
+
     if not content:
         raise HTTPException(400, "Uploaded file is empty.")
 
@@ -156,22 +185,33 @@ async def predict(
                 image = src.read().astype(np.float32)
 
         if image.shape != (11, 256, 256):
-            raise HTTPException(400, f"Expected 11 bands at 256x256; got {image.shape}.")
+            raise HTTPException(
+                400,
+                f"Expected 11 bands at 256x256; got {image.shape}.",
+            )
 
         if not np.isfinite(image).all():
-            raise HTTPException(400, "Image contains invalid numeric values.")
+            raise HTTPException(
+                400,
+                "Image contains invalid numeric values.",
+            )
 
-        # Save the original-image visualization before model normalization.
+        # Save original-image visualization.
         rgb = make_rgb_preview(image)
         original_path = OUTPUT_DIR / f"{image_id}_original.png"
         Image.fromarray(rgb, mode="RGB").save(original_path)
 
-        # Match the training loader's per-band min-max normalization.
+        # Per-band min-max normalization.
         lo = image.min(axis=(1, 2), keepdims=True)
         hi = image.max(axis=(1, 2), keepdims=True)
         normalized = (image - lo) / np.maximum(hi - lo, 1e-6)
 
-        tensor = torch.from_numpy(normalized.copy()).float().unsqueeze(0).to(DEVICE)
+        tensor = (
+            torch.from_numpy(normalized.copy())
+            .float()
+            .unsqueeze(0)
+            .to(DEVICE)
+        )
 
         with torch.no_grad():
             logits = model(tensor)
@@ -182,16 +222,20 @@ async def predict(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(400, f"Could not read or process the GeoTIFF: {exc}")
+        raise HTTPException(
+            400,
+            f"Could not read or process the GeoTIFF: {exc}",
+        )
 
-    # Convert internal IDs 0-14 to MARIDA IDs 1-15 for visualization.
+    # Convert internal IDs 0-14 to MARIDA IDs 1-15.
     marida_mask = (prediction + 1).astype(np.uint8)
 
     mask_path = OUTPUT_DIR / f"{image_id}_mask.png"
     Image.fromarray(marida_mask, mode="L").save(mask_path)
 
-    # Color mask and blend it with the RGB preview.
+    # Color mask and blend with RGB preview.
     color_mask = np.zeros_like(rgb)
+
     for class_id, color in CLASS_COLORS.items():
         color_mask[marida_mask == class_id] = color
 
@@ -205,8 +249,11 @@ async def predict(
 
     unique, counts = np.unique(marida_mask, return_counts=True)
     total = marida_mask.size
+
     percentages = {
-        CLASS_NAMES[int(class_id) - 1]: round(int(count) / total * 100, 2)
+        CLASS_NAMES[int(class_id) - 1]: round(
+            int(count) / total * 100, 2
+        )
         for class_id, count in zip(unique, counts)
     }
 
@@ -214,15 +261,17 @@ async def predict(
 
     return {
         "message": (
-            "Experimental model prediction only. Results require independent "
-            "validation before environmental use."
+            "Experimental model prediction only. Results require "
+            "independent validation before environmental use."
         ),
         "pollution_type": (
             "Marine Debris predicted"
             if debris_percent > 0
             else "Marine Debris not predicted"
         ),
-        "detected_class": CLASS_NAMES[int(np.bincount(prediction.ravel()).argmax())],
+        "detected_class": CLASS_NAMES[
+            int(np.bincount(prediction.ravel()).argmax())
+        ],
         "severity": (
             "High" if debris_percent >= 10
             else "Moderate" if debris_percent >= 3
@@ -236,5 +285,3 @@ async def predict(
         "class_percentages": percentages,
         "sensor_type": sensor_type,
     }
-
-
