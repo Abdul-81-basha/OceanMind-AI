@@ -1,125 +1,95 @@
-          <div>
-            <div className="eyebrow"><span /> FROM IMAGERY TO INSIGHT</div>
-            <h2>A clear, traceable workflow</h2>
-          </div>
-          <p className="sectionintro">
-            Understand each stage, from satellite input to predicted map.
-          </p>
-        </div>
 
-        <div className="steps">
-          <article>
-            <small>01 / INPUT</small><span><CloudUpload /></span>
-            <h3>Upload imagery</h3>
-            <p>Provide a supported 11-band optical satellite GeoTIFF.</p>
-          </article>
-          <article>
-            <small>02 / MODEL</small><span><Layers3 /></span>
-            <h3>Segment with U-Net</h3>
-            <p>The trained model predicts one of 15 MARIDA classes per pixel.</p>
-          </article>
-          <article>
-            <small>03 / REVIEW</small><span><MapPinned /></span>
-            <h3>Inspect the map</h3>
-            <p>Review predicted classes and the generated mask and overlay.</p>
-          </article>
-          <article>
-            <small>04 / EXPORT</small><span><ArrowDownToLine /></span>
-            <h3>Export results</h3>
-            <p>Download the generated mask and color-coded overlay.</p>
-          </article>
-        </div>
-      </section>
+"use client";
 
-      <section id="about" className="notice">
-        <span><ShieldCheck size={20} /></span>
-        <div>
-          <b>Research prototype â€” not an operational alert system</b>
-          <p>
-            Clouds, waves, satellite artefacts, and other water types can be
-            misclassified. Predictions require validation against labeled data
-            and expert review before environmental decisions. SAR input and
-            real-world area estimates are not supported by this checkpoint.
-          </p>
-        </div>
-      </section>
+import { ChangeEvent, DragEvent, useState } from "react";
+import {
+  Activity, ArrowDownToLine, ArrowRight, CheckCircle2,
+  CloudUpload, FileImage, Globe2, Layers3, LoaderCircle,
+  MapPinned, Menu, Microscope, ShieldCheck, Waves, X,
+  Gauge, Droplets
+} from "lucide-react";
 
-      <footer>
-        <a href="#" className="brand">
-          <span className="brandmark"><Waves size={20} /></span>
-          <span className="brandtext">oceanmind<span>ai</span><small>MARINE INTELLIGENCE</small></span>
-        </a>
-        <span>Built for healthier oceans Â· OceanMind AI 2.0</span>
-        <span className="status"><i /> Frontend preview</span>
-      </footer>
-      {zoomImage && (
-        <div
-          onClick={() => setZoomImage(null)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 9999,
-            background: "rgba(5, 18, 25, 0.92)",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 20
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: "min(95vw, 1000px)",
-              height: "85vh",
-              display: "flex",
-              flexDirection: "column",
-              gap: 12,
-              color: "white"
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <strong style={{ marginRight: "auto" }}>{zoomImage.title}</strong>
-              <button onClick={() => setZoomLevel(v => Math.max(1, v - 0.5))}>−</button>
-              <span>{Math.round(zoomLevel * 100)}%</span>
-              <button onClick={() => setZoomLevel(v => Math.min(5, v + 0.5))}>+</button>
-              <button onClick={() => setZoomLevel(1)}>Reset</button>
-              <button onClick={() => setZoomImage(null)}>Close ✕</button>
-            </div>
-            <div
-              style={{
-                flex: 1,
-                overflow: "auto",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                border: "1px solid #53656b",
-                borderRadius: 10,
-                background: "#101b22"
-              }}
-            >
-              <img
-                src={zoomImage.url}
-                alt={zoomImage.title}
-                style={{
-                  width: `${zoomLevel * 100}%`,
-                  maxWidth: "none",
-                  maxHeight: zoomLevel === 1 ? "100%" : "none",
-                  objectFit: "contain",
-                  transformOrigin: "center"
-                }}
-              />
-            </div>
-            <small>Use the + and − controls to inspect predicted regions. Click outside to close.</small>
-          </div>
-        </div>
-      )}
-    </main>
-  );
+type Result = {
+  pollution_type?: string;
+  detected_class?: string;
+  severity?: string;
+  pollution_area_percent?: number;
+  confidence?: number;
+  dice?: number;
+  class_percentages?: Record<string, number>;
+  mask_url?: string | null;
+  overlay_url?: string | null;
+  output_image_url?: string | null;
+  processed_image_url?: string | null;
+  message?: string;
+  sensor_type?: string;
+};
+
+const API_URL = (
+  process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"
+).replace(/\/$/, "");
+
+const colors: Record<string, string> = {
+  "Marine Debris": "#24c7b5",
+  "Marine debris": "#24c7b5",
+  "Dense Sargassum": "#ffb454",
+  "Sparse Sargassum": "#e5b65c",
+  "Natural Organic Material": "#b6a0ff",
+  Ship: "#e879b9",
+  Clouds: "#cbd5e1",
+  "Marine Water": "#78909c",
+  "Sediment-Laden Water": "#5486c7",
+  Foam: "#e5e7eb",
+  "Turbid Water": "#3da6b3",
+  "Shallow Water": "#57a77b",
+  Waves: "#7bc9d4",
+  "Cloud Shadows": "#7b8294",
+  Wakes: "#8bcfba",
+  "Mixed Water": "#b7a0d9"
+};
+
+function imageUrl(url?: string | null) {
+  if (!url) return "";
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    return url;
+  }
+  return `${API_URL}${url.startsWith("/") ? "" : "/"}${url}`;
 }
 
+export default function Home() {
+  const [sensor, setSensor] = useState("optical");
+  const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [zoomImage, setZoomImage] = useState<{ title: string; url: string } | null>(null);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [dragging, setDragging] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState<Result | null>(null);
+  const [menu, setMenu] = useState(false);
 
+  function acceptFile(f?: File) {
+    if (!f) return;
 
+    const name = f.name.toLowerCase();
+    const allowed = [".tif", ".tiff", ".png", ".jpg", ".jpeg"];
 
+    if (!allowed.some((ext) => name.endsWith(ext))) {
+      setError("Choose a GeoTIFF, TIFF, PNG, or JPEG image.");
+      return;
+    }
 
+    setFile(f);
+    setError("");
+    setResult(null);
+  }
 
+  function fileChange(e: ChangeEvent<HTMLInputElement>) {
+    acceptFile(e.target.files?.[0]);
+  }
+
+  function drop(e: DragEvent<HTMLLabelElement>) {
+    e.preventDefault();
+    setDragging(false);
+    acceptFile(e.dataTransfer.files?.[0]);
+  }
